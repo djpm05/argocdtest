@@ -1,0 +1,91 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus
+  namespace: argocd                                # Namespace in which ArgoCD is deployed
+spec:
+  destination:
+    namespace: monitoring
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    chart: kube-prometheus-stack
+    repoURL: https://prometheus-community.github.io/helm-charts
+    targetRevision: 23.3.1
+    helm:
+      values: |
+        fullnameOverride: prometheus
+        prometheus:
+          prometheusSpec:
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: nfs-client
+                  resources:
+                    requests:
+                      storage: 5Gi     # Size of volume used by prometheus'. Can be modified depending on  required retention
+        grafana:
+          initChownData:
+            enabled: false
+          grafana.ini:
+            feature_toggles:
+              enable: tempoSearch      # To enable search option for tempo traces on Grafana
+          persistence:
+            type: statefulset          # To deploy Grafana as a StatefulSet
+            enabled: true
+            size: 5Gi                  # Size of volume used by Grafana for storing dashboards created from the Grafana UI
+          datasources:                 # Omit this if no additional datasources are required
+            datasources.yaml:
+              apiVersion: 1
+              datasources:
+              - name: Loki             # Adding Loki as datasource
+                type: loki
+                uid: Loki
+                access: proxy
+                editable: false
+                url: http://loki-gateway.monitoring:80     # DNS of loki-gateway
+                jsonData:                                  # To setup integration between Loki and Tempo
+                  derivedFields:
+                    - datasourceUid: Tempo
+                      matcherRegex: "(?:traceID|traceId)(?:=|\\s)(\\w+)"
+                      name: TraceID
+                      url: "$${__value.raw}"
+              - name: Tempo                         # Adding Tempo datasource
+                type: tempo
+                uid: Tempo
+                access: proxy
+                editable: false
+                url: http://tempo-gateway.monitoring:80
+          sidecar:                              
+            dashboards:
+              enabled: true                        # To enable dashboards as configMaps automatically picked up by Grafana
+              label: grafana_dashboard             # Label the configMaps should have in order to be added
+              folder: /tmp/dashboards
+              searchNamespace: ALL                 # To look for dashboard configMaps in all namespaces
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+
+
+      Name:         prometheus-grafana
+Namespace:    monitoring
+Labels:       app.kubernetes.io/instance=prometheus
+              app.kubernetes.io/managed-by=Helm
+              app.kubernetes.io/name=grafana
+              app.kubernetes.io/version=8.3.1
+              helm.sh/chart=grafana-6.19.0
+Annotations:  <none>
+
+Type:  Opaque
+
+Data
+====
+admin-password:  13 bytes
+admin-user:      5 bytes
+ldap-toml:       0 bytes
+
